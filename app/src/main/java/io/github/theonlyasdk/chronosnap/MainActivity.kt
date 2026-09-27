@@ -100,6 +100,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -558,33 +559,60 @@ fun CollapsibleBottomSheet(
     peekHeight: Dp = 152.dp,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
-    val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val peekPx = with(density) { peekHeight.toPx() }
 
     var sheetHeightPx by remember { mutableStateOf(0) }
     var expanded by remember { mutableStateOf(false) }
-    val offset = remember { Animatable(0f) }
+    var dragging by remember { mutableStateOf(false) }
+    var dragOffsetPx by remember { mutableFloatStateOf(0f) }
 
     // Collapsed = pushed down by the hidden part, expanded = fully on screen.
     val collapsedOffset = (sheetHeightPx - peekPx).coerceAtLeast(0f)
 
-    LaunchedEffect(expanded, collapsedOffset) {
-        if (sheetHeightPx > 0) {
-            offset.animateTo(
-                targetValue = if (expanded) 0f else collapsedOffset,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessLow
-                )
+    // While dragging, a short tween tracks the finger almost exactly; on release the
+    // spring carries it to the nearest end. One continuous value, so it never jumps.
+    val offsetPx by animateFloatAsState(
+        targetValue = when {
+            dragging -> dragOffsetPx
+            expanded -> 0f
+            else -> collapsedOffset
+        },
+        animationSpec = if (dragging) {
+            tween(60)
+        } else {
+            spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessLow
             )
+        },
+        label = "sheetOffset"
+    )
+
+    val dragModifier = Modifier.draggable(
+        orientation = Orientation.Vertical,
+        state = rememberDraggableState { delta ->
+            dragging = true
+            dragOffsetPx = (dragOffsetPx + delta).coerceIn(0f, collapsedOffset)
+        },
+        onDragStopped = { velocity ->
+            val target = when {
+                velocity < -400f -> 0f
+                velocity > 400f -> collapsedOffset
+                else -> if (dragOffsetPx < collapsedOffset / 2f) 0f else collapsedOffset
+            }
+            expanded = target == 0f
+            dragging = false
         }
-    }
+    )
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .offset { IntOffset(0, if (sheetHeightPx > 0) offset.value.roundToInt() else peekPx.roundToInt()) }
+            // Only once expanded does the whole panel become a drag target, so a collapsed
+            // sheet does not swallow the vertical drags that pan/zoom the photo behind it.
+            .then(if (expanded) dragModifier else Modifier)
+            .offset { IntOffset(0, if (sheetHeightPx > 0) offsetPx.roundToInt() else peekPx.roundToInt()) }
             .onSizeChanged { sheetHeightPx = it.height }
             .cloudy(sky = sky, radius = 20)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f))
@@ -592,40 +620,44 @@ fun CollapsibleBottomSheet(
             .padding(horizontal = 16.dp)
             .padding(bottom = 16.dp)
     ) {
-        // Handle: tap to toggle, drag vertically to expand/collapse.
+        // Drag the handle to expand/collapse; tap the grip to toggle.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(24.dp)
-                .clickable { expanded = !expanded }
                 .draggable(
                     orientation = Orientation.Vertical,
                     state = rememberDraggableState { delta ->
-                        scope.launch {
-                            offset.snapTo(
-                                (offset.value - delta).coerceIn(0f, collapsedOffset)
-                            )
-                        }
+                        dragging = true
+                        dragOffsetPx = (dragOffsetPx + delta).coerceIn(0f, collapsedOffset)
                     },
                     onDragStopped = { velocity ->
                         val target = when {
                             velocity < -400f -> 0f
                             velocity > 400f -> collapsedOffset
-                            else -> offset.value
+                            else -> if (dragOffsetPx < collapsedOffset / 2f) 0f else collapsedOffset
                         }
                         expanded = target == 0f
+                        dragging = false
                     }
                 ),
             contentAlignment = Alignment.Center
         ) {
             Box(
                 modifier = Modifier
-                    .size(width = 32.dp, height = 4.dp)
-                    .background(
-                        MaterialTheme.colorScheme.onSurfaceVariant,
-                        RoundedCornerShape(2.dp)
-                    )
-            )
+                    .size(width = 44.dp, height = 24.dp)
+                    .clickable { expanded = !expanded },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 32.dp, height = 4.dp)
+                        .background(
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                            RoundedCornerShape(2.dp)
+                        )
+                )
+            }
         }
 
         Spacer(Modifier.height(4.dp))
