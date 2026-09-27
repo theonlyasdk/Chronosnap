@@ -31,8 +31,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
-import android.view.ContextThemeWrapper
+import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -43,8 +42,14 @@ import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material3.IconButton
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import kotlin.math.roundToInt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -71,12 +76,9 @@ import androidx.compose.material.icons.rounded.AccessTime
 import androidx.compose.material.icons.rounded.Info
 import coil.request.ImageRequest
 import androidx.compose.material3.rememberTimePickerState
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.appcompat.widget.PopupMenu
-import androidx.appcompat.widget.AppCompatImageButton
-import android.util.TypedValue
-import android.content.res.ColorStateList
-import android.widget.Toast
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.activity.result.IntentSenderRequest
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.SnackbarHost
@@ -341,43 +343,35 @@ class MainActivity : ComponentActivity() {
                                     }
 
                                     if (state.selectedUri == null && !showSettings) {
-                                        val iconTint = MaterialTheme.colorScheme.onPrimaryContainer.toArgb()
-                                        val isDark = isSystemInDarkTheme()
-                                        AndroidView(
-                                            factory = { ctx ->
-                                                AppCompatImageButton(ctx).apply {
-                                                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                                                    setImageDrawable(androidx.core.content.ContextCompat.getDrawable(ctx, androidx.appcompat.R.drawable.abc_ic_menu_overflow_material))
-                                                    imageTintList = ColorStateList.valueOf(iconTint)
-
-                                                    setOnClickListener { view ->
-                                                        val themedContext = ContextThemeWrapper(
-                                                            ctx,
-                                                            if (isDark) androidx.appcompat.R.style.Theme_AppCompat
-                                                            else androidx.appcompat.R.style.Theme_AppCompat_Light
-                                                        )
-                                                        val popup = PopupMenu(themedContext, view)
-                                                        popup.menu.add("Settings")
-                                                        popup.menu.add("About")
-                                                        popup.setOnMenuItemClickListener { menuItem ->
-                                                            when (menuItem.title) {
-                                                                "Settings" -> {
-                                                                    showSettings = true
-                                                                    true
-                                                                }
-                                                                "About" -> {
-                                                                    Toast.makeText(ctx, "Chronosnap\nDesigned with ❤️ by theonlyasdk", Toast.LENGTH_LONG).show()
-                                                                    true
-                                                                }
-                                                                else -> false
-                                                            }
-                                                        }
-                                                        popup.show()
+                                        var showMenu by remember { mutableStateOf(false) }
+                                        Box {
+                                            IconButton(onClick = { showMenu = true }) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.MoreVert,
+                                                    contentDescription = "More options",
+                                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
+                                            }
+                                            DropdownMenu(
+                                                expanded = showMenu,
+                                                onDismissRequest = { showMenu = false }
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Settings") },
+                                                    onClick = {
+                                                        showMenu = false
+                                                        showSettings = true
                                                     }
-                                                }
-                                            },
-                                            modifier = Modifier.size(48.dp)
-                                        )
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("About") },
+                                                    onClick = {
+                                                        showMenu = false
+                                                        Toast.makeText(context, "Chronosnap\nDesigned with ❤️ by theonlyasdk", Toast.LENGTH_LONG).show()
+                                                    }
+                                                )
+                                            }
+                                        }
                                     }
                                 },
                                 colors = TopAppBarDefaults.topAppBarColors(
@@ -522,46 +516,120 @@ fun PhotoDateChangerContent(
                 EmptyState(onPickImage = onPickImage)
             }
         } else {
-            Box(
-                modifier = modifier.fillMaxSize().zIndex(1f)
-            ) {
+            val canEdit = state.status is PhotoStatus.Success ||
+                    state.status is PhotoStatus.Saving ||
+                    state.status is PhotoStatus.SaveSuccess
+
+            Box(modifier = modifier.fillMaxSize().zIndex(1f)) {
                 ImagePreviewCard(
                     uri = currentUri,
-                    metadata = state.metadata,
-                    topPadding = contentPadding.calculateTopPadding(),
                     sky = sky,
                     modifier = Modifier.fillMaxSize()
                 )
 
-                if (state.status is PhotoStatus.Success || state.status is PhotoStatus.Saving || state.status is PhotoStatus.SaveSuccess) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
+                if (canEdit) {
+                    CollapsibleBottomSheet(
+                        sky = sky,
+                        modifier = Modifier.align(Alignment.BottomCenter)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .cloudy(sky = sky, radius = 20)
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f))
+                        EditMetadataCard(
+                            pendingDateTime = state.pendingDateTime,
+                            onDateChange = viewModel::onDateChanged,
+                            onTimeChange = viewModel::onTimeChanged
                         )
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .navigationBarsPadding()
-                                .padding(16.dp)
-                        ) {
-                            EditMetadataCard(
-                                pendingDateTime = state.pendingDateTime,
-                                onDateChange = viewModel::onDateChanged,
-                                onTimeChange = viewModel::onTimeChanged
-                            )
-                        }
+                        Spacer(Modifier.height(16.dp))
+                        ExifMetadataContent(metadata = state.metadata)
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * Bottom sheet that starts collapsed to a fixed peek height (drag handle + caller content)
+ * and slides up to reveal everything else. Offset is driven directly instead of relying on
+ * BottomSheetScaffold, which does not lay out its sheet inside an AnimatedContent.
+ */
+@Composable
+fun CollapsibleBottomSheet(
+    sky: com.skydoves.cloudy.Sky,
+    modifier: Modifier = Modifier,
+    peekHeight: Dp = 152.dp,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val peekPx = with(density) { peekHeight.toPx() }
+
+    var sheetHeightPx by remember { mutableStateOf(0) }
+    var expanded by remember { mutableStateOf(false) }
+    val offset = remember { Animatable(0f) }
+
+    // Collapsed = pushed down by the hidden part, expanded = fully on screen.
+    val collapsedOffset = (sheetHeightPx - peekPx).coerceAtLeast(0f)
+
+    LaunchedEffect(expanded, collapsedOffset) {
+        if (sheetHeightPx > 0) {
+            offset.animateTo(
+                targetValue = if (expanded) 0f else collapsedOffset,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessLow
+                )
+            )
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .offset { IntOffset(0, if (sheetHeightPx > 0) offset.value.roundToInt() else peekPx.roundToInt()) }
+            .onSizeChanged { sheetHeightPx = it.height }
+            .cloudy(sky = sky, radius = 20)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f))
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 16.dp)
+    ) {
+        // Handle: tap to toggle, drag vertically to expand/collapse.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(24.dp)
+                .clickable { expanded = !expanded }
+                .draggable(
+                    orientation = Orientation.Vertical,
+                    state = rememberDraggableState { delta ->
+                        scope.launch {
+                            offset.snapTo(
+                                (offset.value - delta).coerceIn(0f, collapsedOffset)
+                            )
+                        }
+                    },
+                    onDragStopped = { velocity ->
+                        val target = when {
+                            velocity < -400f -> 0f
+                            velocity > 400f -> collapsedOffset
+                            else -> offset.value
+                        }
+                        expanded = target == 0f
+                    }
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(width = 32.dp, height = 4.dp)
+                    .background(
+                        MaterialTheme.colorScheme.onSurfaceVariant,
+                        RoundedCornerShape(2.dp)
+                    )
+            )
+        }
+
+        Spacer(Modifier.height(4.dp))
+        content()
     }
 }
 
@@ -619,7 +687,7 @@ fun EmptyState(onPickImage: () -> Unit) {
 }
 
 @Composable
-fun ImagePreviewCard(uri: android.net.Uri, metadata: ExifMetadata?, topPadding: Dp, sky: com.skydoves.cloudy.Sky, modifier: Modifier = Modifier) {
+fun ImagePreviewCard(uri: android.net.Uri, sky: com.skydoves.cloudy.Sky, modifier: Modifier = Modifier) {
     val scale = remember { Animatable(1f) }
     val offsetX = remember { Animatable(0f) }
     val offsetY = remember { Animatable(0f) }
@@ -753,65 +821,50 @@ fun ImagePreviewCard(uri: android.net.Uri, metadata: ExifMetadata?, topPadding: 
                     ),
                 contentScale = ContentScale.Crop
             )
+        }
+    }
+}
 
-            val EXIFShadow = Shadow(
-                color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.8f),
-                offset = Offset(2f, 2f),
-                blurRadius = 4f
+@Composable
+fun ExifMetadataContent(metadata: ExifMetadata?) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = "EXIF METADATA",
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (metadata == null || (metadata.dateOriginal == null && metadata.dateDigitized == null && metadata.dateDateTime == null)) {
+            Text(
+                text = "No date metadata found",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
             )
-
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(start = 16.dp, top = topPadding + 16.dp, end = 16.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+        } else {
+            metadata.dateOriginal?.let {
                 Text(
-                    text = "EXIF METADATA",
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        shadow = EXIFShadow
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    text = "Original:  $it",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-                if (metadata == null || (metadata.dateOriginal == null && metadata.dateDigitized == null && metadata.dateDateTime == null)) {
-                    Text(
-                        text = "No date metadata found",
-                        style = MaterialTheme.typography.bodyMedium.copy(shadow = EXIFShadow),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                } else {
-                    metadata.dateOriginal?.let {
-                        Text(
-                            text = "Original:  $it",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                shadow = EXIFShadow,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    metadata.dateDigitized?.let {
-                        Text(
-                            text = "Digitized: $it",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                shadow = EXIFShadow,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    metadata.dateDateTime?.let {
-                        Text(
-                            text = "Modified:  $it",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                shadow = EXIFShadow,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
+            }
+            metadata.dateDigitized?.let {
+                Text(
+                    text = "Digitized: $it",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            metadata.dateDateTime?.let {
+                Text(
+                    text = "Modified:  $it",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
         }
     }
