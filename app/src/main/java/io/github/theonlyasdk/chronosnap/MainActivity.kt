@@ -90,6 +90,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -183,9 +184,19 @@ class MainActivity : ComponentActivity() {
 
             val sky = rememberSky()
             var showSettings by remember { mutableStateOf(false) }
+            var dynamicColorsEnabled by rememberSaveable { mutableStateOf(true) }
             val settingsBackProgress = remember { Animatable(0f) }
 
-            ChronosnapTheme {
+            val appVersion = rememberAppVersion()
+            val showAbout = {
+                Toast.makeText(
+                    context,
+                    "Chronosnap v$appVersion\nDesigned with ❤️ by theonlyasdk",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+
+            ChronosnapTheme(dynamicColor = dynamicColorsEnabled) {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
@@ -368,7 +379,7 @@ class MainActivity : ComponentActivity() {
                                                     text = { Text("About") },
                                                     onClick = {
                                                         showMenu = false
-                                                        Toast.makeText(context, "Chronosnap\nDesigned with ❤️ by theonlyasdk", Toast.LENGTH_LONG).show()
+                                                        showAbout()
                                                     }
                                                 )
                                             }
@@ -418,7 +429,10 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = innerPadding,
                                 backProgress = settingsBackProgress,
-                                onBack = { showSettings = false }
+                                onBack = { showSettings = false },
+                                onAbout = showAbout,
+                                dynamicColorsEnabled = dynamicColorsEnabled,
+                                onDynamicColorsChange = { dynamicColorsEnabled = it }
                             )
                         } else {
                             PhotoDateChangerContent(
@@ -1077,12 +1091,28 @@ fun PhotoDateChangerPreview() {
     }
 }
 
+/** Reads the installed version name from the package manager, e.g. "1.1". */
+@Suppress("DEPRECATION")
+@Composable
+fun rememberAppVersion(): String {
+    val context = LocalContext.current
+    return remember(context) {
+        runCatching {
+            val pm = context.packageManager
+            pm.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "unknown"
+    }
+}
+
 @Composable
 fun SettingsScreen(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
     backProgress: Animatable<Float, *>? = null,
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    onAbout: () -> Unit = {},
+    dynamicColorsEnabled: Boolean = true,
+    onDynamicColorsChange: (Boolean) -> Unit = {}
 ) {
     if (backProgress != null) {
         PredictiveBackHandler { progress ->
@@ -1104,7 +1134,6 @@ fun SettingsScreen(
     }
 
     var overrideTimeFormat by remember { mutableStateOf(false) }
-    var dynamicColorsEnabled by remember { mutableStateOf(true) }
 
     val radius = 20.dp
     val topShape = RoundedCornerShape(topStart = radius, topEnd = radius, bottomStart = 4.dp, bottomEnd = 4.dp)
@@ -1181,7 +1210,7 @@ fun SettingsScreen(
                         trailingContent = {
                             Switch(
                                 checked = dynamicColorsEnabled,
-                                onCheckedChange = { dynamicColorsEnabled = it },
+                                onCheckedChange = onDynamicColorsChange,
                                 thumbContent = {
                                     AnimatedContent(targetState = dynamicColorsEnabled, label = "paletteSwitch") { checked ->
                                         if (checked) {
@@ -1215,9 +1244,11 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape = singleShape
             ) {
+                val appVersion = rememberAppVersion()
                 ListItem(
                     headlineContent = { Text("Application info") },
-                    supportingContent = { Text("Version 1.0.0 (release)") },
+                    modifier = Modifier.clickable(onClick = onAbout),
+                    supportingContent = { Text("Version $appVersion") },
                     leadingContent = {
                         Icon(
                             imageVector = Icons.Rounded.Info,
